@@ -46,28 +46,58 @@ class MvNormal(Continuous):
     def random(self, point=None, size=None):
         mu, tau = draw_values([self.mu, self.tau], point=point)
 
-        def _random(mean, cov, size=None):
-            # FIXME: cov here is actually precision?
-            return stats.multivariate_normal.rvs(
-                mean, cov, None if size == mean.shape else size)
+        def _random(mean, tau, size=None):
+            reps_shape = tau.shape[:-2]
+            reps_shape_prod = np.prod(reps_shape, keepdims=True)
+            dist_shape = mean.shape[-1:]
+            flat_supp_shape = np.concatenate([reps_shape_prod, dist_shape])
+            mus_collapsed = np.reshape(mean, flat_supp_shape)
+            taus_collapsed = np.reshape(tau, np.concatenate([reps_shape_prod, dist_shape, dist_shape]))
+            # FIXME: do something smarter about tau/cov
+            covs_collapsed = map(np.linalg.inv, taus_collapsed)
+            res = map(stats.multivariate_normal.rvs, mus_collapsed, covs_collapsed)
+            return np.asarray(res).reshape(np.concatenate([reps_shape , dist_shape]))
 
         samples = generate_samples(_random,
-                                   mean=mu, cov=tau,
+                                   mean=mu, tau=tau,
                                    dist_shape=self.shape,
                                    broadcast_shape=mu.shape,
                                    size=size)
         return samples
 
     def logp(self, value):
-        mu = self.mu
-        tau = self.tau
+        mu = T.as_tensor_variable(self.mu)
+        tau = T.as_tensor_variable(self.tau)
 
-        delta = value - mu
-        k = tau.shape[0]
+        reps_shape_T = tau.shape[:-2]
+        reps_shape_prod = T.prod(reps_shape_T, keepdims=True)
+        dist_shape_T = mu.shape[-1:]
 
-        result = k * T.log(2 * np.pi) + T.log(1./det(tau))
-        result += (delta.dot(tau) * delta).sum(axis=delta.ndim - 1)
-        return -1/2. * result
+        # collapse reps dimensions
+        flat_supp_shape = T.concatenate([reps_shape_prod, dist_shape_T])
+        mus_collapsed = mu.reshape(flat_supp_shape, ndim=2)
+        taus_collapsed = tau.reshape(T.concatenate([reps_shape_prod,
+            dist_shape_T, dist_shape_T]), ndim=3)
+
+        # force value to conform to reps_shape
+        value_reshape = T.ones_like(mu) * value
+        values_collapsed = value_reshape.reshape(flat_supp_shape, ndim=2)
+
+        def single_logl(_mu, _tau, _value, k):
+            delta = _value - _mu
+            result = k * T.log(2 * np.pi) + T.log(det(_tau))
+            result += T.square(delta.dot(_tau)).sum(axis=-1)
+            return -result/2
+
+        from theano import scan
+        res, _ = scan(fn=single_logl
+                , sequences=[mus_collapsed, taus_collapsed, values_collapsed]
+                , non_sequences=[dist_shape_T]
+                , strict=True
+                )
+        return res.sum()
+
+
 
 
 class Dirichlet(Continuous):
@@ -310,7 +340,7 @@ class Wishart(Continuous):
                      n > (p - 1))
 
 
-    
+
 class LKJCorr(Continuous):
     R"""
     The LKJ (Lewandowski, Kurowicka and Joe) log-likelihood.

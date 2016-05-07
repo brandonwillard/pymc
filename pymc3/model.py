@@ -194,7 +194,7 @@ class Model(Context, Factor):
 
     @property
     def varlogpt(self):
-        """Theano scalar of log-probability of the unobserved random variables 
+        """Theano scalar of log-probability of the unobserved random variables
            (excluding deterministic)."""
         factors = [var.logpt for var in self.vars]
         return T.add(*map(T.sum, factors))
@@ -560,12 +560,12 @@ class ObservedRV(Factor, TensorVariable):
                              inputs=[data], outputs=[self])
 
             self.tag.test_value = theano.compile.view_op(data).tag.test_value
-            
+
     @property
     def init_value(self):
         """Convenience attribute to return tag.test_value"""
         return self.tag.test_value
-        
+
 
 class MultiObservedRV(Factor):
     """Observed random variable that a model is specified in terms of.
@@ -662,7 +662,7 @@ class TransformedRV(TensorVariable):
     def init_value(self):
         """Convenience attribute to return tag.test_value"""
         return self.tag.test_value
-        
+
 def as_iterargs(data):
     if isinstance(data, tuple):
         return data
